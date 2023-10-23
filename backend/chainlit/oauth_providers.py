@@ -352,6 +352,65 @@ class Auth0OAuthProvider(OAuthProvider):
                 )
                 return (user, app_user)
 
+class KeycloakOAuthProvider(OAuthProvider):
+    id = "keycloak"
+    env = [
+        "OAUTH_KEYCLOAK_CLIENT_ID",
+        "OAUTH_KEYCLOAK_CLIENT_SECRET",
+        "OAUTH_KEYCLOAK_REALM",
+        "OAUTH_KEYCLOAK_AUTH_URL",
+    ]
+    authorize_url = os.environ.get("OAUTH_KEYCLOAK_AUTH_URL")
+
+    def __init__(self):
+        self.client_id = os.environ.get("OAUTH_KEYCLOAK_CLIENT_ID")
+        self.client_secret = os.environ.get("OAUTH_KEYCLOAK_CLIENT_SECRET")
+        self.realm = os.environ.get("OAUTH_KEYCLOAK_REALM")
+        self.authorize_params = {
+            "response_type": "code",
+            "scope": "openid profile",
+            "realm": self.realm,
+        }
+
+    async def get_token(self, code: str, url: str):
+        payload = {
+            "client_id": self.client_id,
+            "client_secret": self.client_secret,
+            "code": code,
+            "grant_type": "authorization_code",
+            "redirect_uri": url,
+        }
+        async with aiohttp.ClientSession(
+            trust_env=True, raise_for_status=True
+        ) as session:
+            async with session.post(
+                f"{self.authorize_url}/realms/{self.realm}/protocol/openid-connect/token",
+                data=payload,
+            ) as result:
+                json_content = await result.json()
+                token = json_content.get("access_token")
+                if not token:
+                    raise HTTPException(
+                        status_code=400, detail="Failed to get the access token"
+                    )
+                return token
+
+    async def get_user_info(self, token: str):
+        async with aiohttp.ClientSession(
+            trust_env=True, raise_for_status=True
+        ) as session:
+            async with session.get(
+                f"{self.authorize_url}/realms/{self.realm}/protocol/openid-connect/userinfo",
+                headers={"Authorization": f"Bearer {token}"},
+            ) as result:
+                user = await result.json()
+                app_user = AppUser(
+                    username=user.get("preferred_username"),
+                    image="",  # You may need to retrieve the user's image separately
+                    provider="keycloak",
+                )
+                return (user, app_user)
+
 
 providers = [
     GithubOAuthProvider(),
@@ -359,6 +418,7 @@ providers = [
     AzureADOAuthProvider(),
     OktaOAuthProvider(),
     Auth0OAuthProvider(),
+    KeycloakOAuthProvider(),
 ]
 
 
